@@ -47,7 +47,7 @@ public:
     // Constructors
     IPAddress();
     IPAddress(uint8_t first_octet, uint8_t second_octet, uint8_t third_octet, uint8_t fourth_octet);
-    IPAddress(uint32_t address);
+    explicit IPAddress(uint32_t address);
     IPAddress(const uint8_t *address);
     virtual ~IPAddress() {}
 
@@ -56,7 +56,7 @@ public:
 
     // Overloaded cast operator to allow IPAddress objects to be used where a pointer
     // to a four-byte uint8_t array is expected
-    explicit operator uint32_t() const
+    operator uint32_t() const
     {
         return _address.dword;
     }
