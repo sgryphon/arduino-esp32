@@ -661,6 +661,13 @@ IPAddress WiFiSTAClass::dnsIP(uint8_t dns_no)
         return IPAddress();
     }
     const ip_addr_t * dns_ip = dns_getserver(dns_no);
+    if (dns_ip.type == IPADDR_TYPE_V6) {
+        if (IN6_IS_ADDR_V4MAPPED(dns_ip->u_addr.ip6.addr)) {
+            return IPAddress(IPv4, (uint8_t*)dns_ip->u_addr.ip6.addr+IPADDRESS_V4_BYTES_INDEX);
+        } else {
+            return IPAddress(IPv6, (uint8_t*)(dns_ip->u_addr.ip6.addr), dns_ip->u_addr.ip6.zone);
+        }
+    }
     return IPAddress(dns_ip->u_addr.ip4.addr);
 }
 
