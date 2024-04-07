@@ -14,6 +14,8 @@ NetworkManager::NetworkManager(){
 
 }
 
+NetworkInterface * getNetifByID(Network_Interface_ID id);
+
 bool NetworkManager::begin(){
     static bool initialized = false;
     if(!initialized){
@@ -44,19 +46,10 @@ bool NetworkManager::begin(){
  */
 int NetworkManager::hostByName(const char* aHostname, IPAddress& aResult)
 {
-    err_t err = ERR_OK;
-
-    // This should generally check if we have a global address assigned to one of the interfaces.
-    // If such address is not assigned, there is no point in trying to get V6 from DNS as we will not be able to reach it.
-    // That is of course, if 'preferV6' is not set to true
     static bool hasGlobalV6 = false;
-    bool hasGlobalV6Now = false;//ToDo: implement this!
-    if(hasGlobalV6 != hasGlobalV6Now){
-        hasGlobalV6 = hasGlobalV6Now;
-        dns_clear_cache();
-        log_d("Clearing DNS cache");
-    }
-
+    err_t err = ERR_OK;
+    const char *servname = "0";
+    struct addrinfo *res;
     aResult = static_cast<uint32_t>(0);
 
     // First check if the host parses as a literal address
@@ -64,13 +57,55 @@ int NetworkManager::hostByName(const char* aHostname, IPAddress& aResult)
         return 1;
     }
 
-    const char *servname = "0";
-    struct addrinfo *res;
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
+    // **Workaround**
+    // LWIP AF_UNSPEC always prefers IPv4 and doesn't check what network is
+    // available. See https://github.com/espressif/esp-idf/issues/13255
+    // Until that is fixed, as a work around if we have a global scope IPv6,
+    // then we check IPv6 only first.
 
+    // This checks if we have a global address assigned to one of the interfaces.
+    // If such address is assigned, then we trying to get V6 from DNS first.
+    bool hasGlobalV6Now = false;
+    for (int i = 0; i < ESP_NETIF_ID_MAX; ++i){
+        NetworkInterface * iface = getNetifByID((Network_Interface_ID)i);
+        if(iface != NULL && iface->hasGlobalIPv6()){
+            hasGlobalV6Now = true;
+        }
+        if (hasGlobalV6Now){
+            break;
+        }
+    }
+
+    // Clear DNS cache if the flag has changed
+    if(hasGlobalV6 != hasGlobalV6Now){
+        hasGlobalV6 = hasGlobalV6Now;
+        dns_clear_cache();
+        log_d("Clearing DNS cache");
+    }
+
+    if (hasGlobalV6) {
+        const struct addrinfo hints6 = {
+            .ai_family = AF_INET6,
+            .ai_socktype = SOCK_STREAM,
+        };
+        err = lwip_getaddrinfo(aHostname, servname, &hints6, &res);
+
+        if (err == ERR_OK)
+        {
+            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)res->ai_addr;
+            // As an array of u8_t
+            aResult = IPAddress(IPv6, ipv6->sin6_addr.s6_addr);
+            log_d("DNS found IPv6 first %s", aResult.toString().c_str());
+            lwip_freeaddrinfo(res);
+            return 1;
+        }
+    }
+    // **End Workaround**
+
+    const struct addrinfo hints = {
+        .ai_family = AF_UNSPEC,
+        .ai_socktype = SOCK_STREAM,
+    };
     err = lwip_getaddrinfo(aHostname, servname, &hints, &res);
     if (err == ERR_OK)
     {
@@ -129,8 +164,6 @@ bool NetworkManager::setHostname(const char * name)
     }
     return true;
 }
-
-NetworkInterface * getNetifByID(Network_Interface_ID id);
 
 bool NetworkManager::setDefaultInterface(NetworkInterface & ifc)
 {
